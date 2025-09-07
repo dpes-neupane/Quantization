@@ -126,6 +126,7 @@ class EditLayer:
             if not replace:
                 if isinstance(layer, QuantConv) or isinstance(layer, QuantConv):
                     layer.calib = False
+                    
             else:
                 if isinstance(layer, nn.Linear):
                     weight = layer.weight
@@ -148,8 +149,9 @@ class EditLayer:
                     self.model.set_submodule(name, replacedLayer, strict=True)
                     print(f"The {name} layer is replaced by {replacedLayer}")
                     
-                self.count+=1
-        print(f"Total {self.count} replaced.")
+            self.count+=1
+        if replace: print(f"Total {self.count} replaced.")
+        else: print(f"All {self.count} layers changed to test mode.")
         
     def get_model(self):
         return self.model
