@@ -103,7 +103,7 @@ class BaseQuant(nn.Module):
     
     
     
-class ReplaceLayer:
+class EditLayer:
     def __init__(self, model:nn.Module, 
                  wtype:Union[UniformQuant, AdaQuant], 
                  atype:Union[UniformQuant, AdaQuant], 
@@ -192,7 +192,8 @@ class QuantLinear(nn.Module):
         
 
 class QuantConv(nn.Module):
-    def __init__(self, wtype:Union[UniformQuant, AdaQuant],
+    def __init__(self, 
+                 wtype:Union[UniformQuant, AdaQuant],
                  atype:Union[UniformQuant, AdaQuant], 
                  weight:torch.Tensor, 
                  bias:torch.Tensor,
