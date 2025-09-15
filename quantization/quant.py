@@ -180,7 +180,6 @@ class EditLayer:
                         }
                         replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
                         self.model.set_submodule(name, replacedLayer, strict=True)
-                        print(f"The {name} layer is replaced by {replacedLayer}")
                     
                     self.count+=1
             print(f"Total {self.count} {block_name} replaced.")
