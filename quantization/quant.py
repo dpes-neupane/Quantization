@@ -156,7 +156,35 @@ class EditLayer:
     def get_model(self):
         return self.model
     
-
+    def change_blocks_layers(self, block_name=None):
+        iter_model = iter(self.model.named_modules())
+        if block_name is not None:
+            next(iter_model)
+            for name, layer in iter_model:
+                if block_name in name:
+                    if isinstance(layer, nn.Linear):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        
+                        replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                    if isinstance(layer, nn.Conv2d):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        conv_params = {
+                            'in_channels': layer.in_channels, 
+                            'out_channels': layer.out_channels,
+                            'stride': layer.stride,
+                            'padding': layer.padding,
+                            'kernel': layer.kernel_size
+                        }
+                        replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                        print(f"The {name} layer is replaced by {replacedLayer}")
+                    
+                    self.count+=1
+            print(f"Total {self.count} {block_name} replaced.")
+        
     
 
             
@@ -243,3 +271,6 @@ class QuantConv(nn.Module):
         out_unf_dq = out_unf.transpose(2, 1) 
         out_fold = nn.functional.fold(out_unf_dq, output_size=(h_out, w_out), kernel_size=(1, 1)) 
         return out_fold 
+    
+    
+    
