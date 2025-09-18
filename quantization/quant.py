@@ -112,13 +112,15 @@ class EditLayer:
                  ):
         # super().__init__(qtype, q_params)
         self.model = model
-        self.count = 0
+        # self.count = 0
         self.wquant = wtype
         self.aquant = atype
         self.w_qparams = w_qparams
         self.a_qparams = a_qparams
         
     def traverse(self, replace=True):
+        change_count = 0
+        count = 0
         iter_model = iter(self.model.named_modules())
         print("Replacing layer in the model...")
         next(iter_model)
@@ -134,6 +136,7 @@ class EditLayer:
                     
                     replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
                     self.model.set_submodule(name, replacedLayer, strict=True)
+                    change_count += 1
                     print(f"The {name} layer is replaced by {replacedLayer} with {layer.weight.shape} and {layer.bias.shape if layer.bias is not None else None}")
                 if isinstance(layer, nn.Conv2d):
                     weight = layer.weight
@@ -147,43 +150,69 @@ class EditLayer:
                     }
                     replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
                     self.model.set_submodule(name, replacedLayer, strict=True)
+                    change_count += 1
                     print(f"The {name} layer is replaced by {replacedLayer}")
                     
-            self.count+=1
-        if replace: print(f"Total {self.count} replaced.")
+            count+=1
+        if replace: print(f"Total {self.count} layers. And total {change_count} layers changed.")
         else: print(f"All {self.count} layers changed to test mode.")
         
     def get_model(self):
         return self.model
     
-    def change_blocks_layers(self, block_name=None):
+    def change_blocks_layers(self, block_name=None, module_name=None):
+        count = 0
         iter_model = iter(self.model.named_modules())
         if block_name is not None:
             next(iter_model)
             for name, layer in iter_model:
+                # for block level quantization
                 if block_name in name:
-                    if isinstance(layer, nn.Linear):
-                        weight = layer.weight
-                        bias_val = layer.bias
-                        
-                        replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
-                        self.model.set_submodule(name, replacedLayer, strict=True)
-                    if isinstance(layer, nn.Conv2d):
-                        weight = layer.weight
-                        bias_val = layer.bias
-                        conv_params = {
-                            'in_channels': layer.in_channels, 
-                            'out_channels': layer.out_channels,
-                            'stride': layer.stride,
-                            'padding': layer.padding,
-                            'kernel': layer.kernel_size
-                        }
-                        replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
-                        self.model.set_submodule(name, replacedLayer, strict=True)
-                    
-                    self.count+=1
-            print(f"Total {self.count} {block_name} replaced.")
-        
+                    if module_name is None:
+                        if isinstance(layer, nn.Linear):
+                            weight = layer.weight
+                            bias_val = layer.bias
+                            
+                            replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
+                            self.model.set_submodule(name, replacedLayer, strict=True)
+                            count+=1
+                        if isinstance(layer, nn.Conv2d):
+                            weight = layer.weight
+                            bias_val = layer.bias
+                            conv_params = {
+                                'in_channels': layer.in_channels, 
+                                'out_channels': layer.out_channels,
+                                'stride': layer.stride,
+                                'padding': layer.padding,
+                                'kernel': layer.kernel_size
+                            }
+                            replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
+                            self.model.set_submodule(name, replacedLayer, strict=True)
+                            count+=1
+                    elif module_name in name:
+                        if isinstance(layer, nn.Linear):
+                            weight = layer.weight
+                            bias_val = layer.bias
+                            
+                            replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
+                            self.model.set_submodule(name, replacedLayer, strict=True)
+                            count+=1
+                        if isinstance(layer, nn.Conv2d):
+                            weight = layer.weight
+                            bias_val = layer.bias
+                            conv_params = {
+                                'in_channels': layer.in_channels, 
+                                'out_channels': layer.out_channels,
+                                'stride': layer.stride,
+                                'padding': layer.padding,
+                                'kernel': layer.kernel_size
+                            }
+                            replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
+                            self.model.set_submodule(name, replacedLayer, strict=True)
+                            count+=1
+                       
+            print(f"Total {self.count} layers in the {block_name} {'.'+module_name if module_name is not None else ''} replaced.")
+                
     
 
             
