@@ -154,8 +154,8 @@ class EditLayer:
                     print(f"The {name} layer is replaced by {replacedLayer}")
                     
             count+=1
-        if replace: print(f"Total {self.count} layers. And total {change_count} layers changed.")
-        else: print(f"All {self.count} layers changed to test mode.")
+        if replace: print(f"Total {count} layers. And total {change_count} layers changed.")
+        else: print(f"All {count} layers changed to test mode.")
         
     def get_model(self):
         return self.model
@@ -211,7 +211,7 @@ class EditLayer:
                             self.model.set_submodule(name, replacedLayer, strict=True)
                             count+=1
                        
-            print(f"Total {self.count} layers in the {block_name} {'.'+module_name if module_name is not None else ''} replaced.")
+            print(f"Total {count} layers in the {block_name}{'.'+module_name if module_name is not None else ''} replaced.")
                 
     
 
