@@ -67,8 +67,8 @@ class UniformQuant:
 class Clamp(UniformQuant):
     def __init__(self, n_bits, symmetric = True, highC=None, lowC=None):
         super().__init__(n_bits, symmetric)
-        self.scale = 1
-        self.zero = 0
+        self.scale = torch.tensor(1.0)
+        self.zp = torch.tensor(0.0)
         self.high = highC
         self.low = lowC
     def quantize(self, x):
