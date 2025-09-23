@@ -16,7 +16,9 @@ class StraightThrough(nn.Module):
     def forward(self, x:torch.Tensor):
         return x
     
-    
+
+        
+        
 
 
 class UniformQuant:
@@ -62,6 +64,29 @@ class UniformQuant:
     def __str__(self):
         return f"scale = {self.scale} and zp = {self.zp}"
      
+class Clamp(UniformQuant):
+    def __init__(self, n_bits, symmetric = True, highC=None, lowC=None):
+        super().__init__(n_bits, symmetric)
+        self.scale = 1
+        self.zero = 0
+        self.high = highC
+        self.low = lowC
+    def quantize(self, x):
+        self.xmax = x.max().item()
+        if self.high is None:
+            self.high = 6.0
+        if self.low is None:
+            self.low = -6.0
+        if self.symm:
+            self.xmin = - self.xmax
+        else: self.xmin = x.min().item()
+        
+        if self.xmax > self.high and self.xmin < self.low:
+            mask = torch.where(x > self.high, 1.0, 0.0) + torch.where(x < self.low, 1.0, 0.0)
+            mask = 1 - mask
+            # mask = self.xmax < 6.0 + self.xmin > -6.0
+            return  x * mask
+        else: return x 
         
  
 class AdaQuant:
@@ -92,13 +117,7 @@ class AdaQuant:
 
         
 
-class BaseQuant(nn.Module):
-    def __init__(self, model, qtype:Union[UniformQuant, AdaQuant], q_params:dict={}):
-        self.qtype = qtype(**q_params)
-        self.model = model
-    @abstractmethod
-    def _traverse(self):
-       pass
+
     
     
     
@@ -122,7 +141,8 @@ class EditLayer:
         change_count = 0
         count = 0
         iter_model = iter(self.model.named_modules())
-        print("Replacing layer in the model...")
+        if replace:print("Changing to inference mode")
+        else: print("Replacing layer in the model...")
         next(iter_model)
         for name, layer in iter_model:
             if not replace:
