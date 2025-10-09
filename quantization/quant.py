@@ -428,9 +428,9 @@ class QuantConvCH(QuantConv):
         out_ch, in_ch, k1, k2 = self.weight.shape
         x_p, m_x, sorted_indices = self.sort_channel_by_range(x)
         weight_deq = self.wtype.dequantize(self.weight.detach().clone().requires_grad_(False))
-        h_out, w_out = super()._calcOutputSize(x.shape[2], x.shape[3])
+        h_out, w_out = super()._calcOutputSize(h, w)
         bias = torch.repeat_interleave(self.bias, h_out * w_out).view(self.weight.shape[0], h_out, w_out)
-        residual_x = torch.repeat_interleave(m_x.view(m_x.shape[0]*m_x.shape[1]), x.shape[2] * x.shape[3]).view(x.shape[0], x.shape[1], x.shape[2], x.shape[3])
+        residual_x = torch.repeat_interleave(m_x.view(m_x.shape[0]*m_x.shape[1]), h * w).view(b, ch, h, w)
         residual = F.conv2d(residual_x, weight_deq, stride=self.stride, padding=self.padding)
         res_bias = residual + bias
         return self.sub_conv(x_p, sorted_indices, h_out, w_out, b, ch, h, w, out_ch, in_ch, k1, k2) + res_bias
