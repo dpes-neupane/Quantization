@@ -338,7 +338,6 @@ class QuantLinearCH(QuantLinear):
         super().__init__(**params)
         self.ch_groups = ch_groups
         self.atypes = []
-        self.w = params['weight']
         for i in range(self.ch_groups):
             self.atypes.append(params['atype'])
     def sort_channel_by_range(self, x:torch.Tensor):
@@ -359,19 +358,17 @@ class QuantLinearCH(QuantLinear):
         a_scale = []
         a_zp = []
         per_group_channels = math.ceil(ch / self.ch_groups)
-        print("Each group has=", per_group_channels)
         for i in range(0, ch, per_group_channels):
-            print(f"i={i}")
         #quantize the submatrices of x
+            x_sub = x[b_, :, sorted_range_indices[:, i:i+per_group_channels]].transpose(-1, -2)
             if self.calib:
-                x_sub = x[b_, :, sorted_range_indices[:, i:i+per_group_channels]].transpose(-1, -2)
                 x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
                 a_scale.append(self.atypes[i//per_group_channels].scale)
                 a_zp.append(self.atypes[i//per_group_channels].zp)
             else:
                 self.atypes[i//per_group_channels].scale = self.a_scale[i//per_group_channels] 
                 self.atypes[i//per_group_channels].zp = self.a_zp[i//per_group_channels]
-                x_sub_q = self.atypes[i//per_group_channels].quantize(x[b_, :, sorted_range_indices[:, i:i+per_group_channels]].transpose(-1, -2))
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
             sub_matmul = torch.matmul(x_sub_q - self.atypes[i//per_group_channels].zp, self.weight.T[sorted_range_indices[:, i:i+per_group_channels], :] - self.w_zp)
             output += ((self.atypes[i//per_group_channels].scale * self.wtype.scale) * sub_matmul)
 
@@ -383,3 +380,58 @@ class QuantLinearCH(QuantLinear):
         x_p, m_x, sorted_indices = self.sort_channel_by_range(x)
         weight_deq = self.wtype.dequantize(self.weight.detach().clone().requires_grad_(False))
         return self.sub_matmul(x_p, sorted_indices) + ((m_x @ weight_deq.T) + self.bias)
+    
+    
+    
+class QuantConvCH(QuantConv):
+    def __init__(self, ch_groups=16, **params):
+        super().__init__(**params)
+        self.atypes = []
+        self.ch_groups = ch_groups
+        for i in range(self.ch_groups):
+            self.atypes.append(params['atype'])
+    def sort_channel_by_range(self, x:torch.Tensor):
+        min_x = torch.min(x.view(-1, x.shape[1], x.shape[2] * x.shape[3]), dim=-1)[0]
+        max_x = torch.max(x.view(-1, x.shape[1], x.shape[2] * x.shape[3]), dim=-1)[0]
+        mean_x = ((max_x + min_x) / 2).unsqueeze(2).unsqueeze(2)
+        x_prime = x - mean_x
+        act_range = abs(max_x - min_x)
+        #sorting channels using activation range
+        return x_prime, mean_x, torch.argsort(act_range)
+        
+    def sub_conv(self, x:torch.Tensor, sorted_range_indices:torch.Tensor, 
+                 h_out:int, w_out:int, b:int, ch:int, h:int, w:int, out_ch:int, in_ch:int, k1:int, k2:int):
+        b_ = torch.arange(b).reshape(-1, 1)
+        output = torch.zeros(b, out_ch, h_out, w_out)
+        a_scale = []
+        a_zp = []
+        per_group_channels = math.ceil(ch / self.ch_groups)
+        for i in range(0, ch, per_group_channels):
+            x_sub = x[b_, sorted_range_indices[:, i:i+per_group_channels], :, :]
+            if self.calib:
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
+                a_scale.append(self.atypes[i//per_group_channels].scale)
+                a_zp.append(self.atypes[i//per_group_channels].zp)
+            else:
+                self.atypes[i//per_group_channels].scale = self.a_scale[i//per_group_channels] 
+                self.atypes[i//per_group_channels].zp = self.a_zp[i//per_group_channels]
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
+            x_sub_q = x_sub_q - self.atypes[i//per_group_channels].zp
+            weight = self.weight.transpose(0, 1)[sorted_range_indices[:, i:i+per_group_channels], :, :, :].transpose(1, 2) - self.w_zp
+            for i in range(b):
+                sub_conv = F.conv2d(x_sub_q[i], weight[i], stride=self.stride, padding=self.padding)
+                out_deq = (self.atypes[i//per_group_channels].scale * self.w_scale) * sub_conv 
+                output[i] += out_deq
+        return output
+    def forward(self, x:torch.Tensor):
+        b, ch, h, w = x.shape
+        out_ch, in_ch, k1, k2 = self.weight.shape
+        x_p, m_x, sorted_indices = self.sort_channel_by_range(x)
+        weight_deq = self.wtype.dequantize(self.weight.detach().clone().requires_grad_(False))
+        h_out, w_out = super()._calcOutputSize(x.shape[2], x.shape[3])
+        bias = torch.repeat_interleave(self.bias, h_out * w_out).view(self.weight.shape[0], h_out, w_out)
+        residual_x = torch.repeat_interleave(m_x.view(m_x.shape[0]*m_x.shape[1]), x.shape[2] * x.shape[3]).view(x.shape[0], x.shape[1], x.shape[2], x.shape[3])
+        residual = F.conv2d(residual_x, weight_deq, stride=self.stride, padding=self.padding)
+        res_bias = residual + bias
+        return self.sub_conv(x_p, sorted_indices, h_out, w_out, b, ch, h, w, out_ch, in_ch, k1, k2) + res_bias
+        
