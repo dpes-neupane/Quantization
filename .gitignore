@@ -3,4 +3,5 @@
 !./quantization/quant.py
 !./quantization/run.py
 !./quantization/unet.py
-!.gitignore
+# !.gitignore
+!quantization/*

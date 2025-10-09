@@ -45,9 +45,10 @@ class UniformQuant:
             return (self.qmax - quotient).detach().clone()
             # return torch.tensor(self.qmax - (torch.round(torch.tensor(self.xmax/self.scale))))
         else: return torch.tensor(0)
-    def quantize(self, x:torch.Tensor):
-        self.scale = self.calc_scale(x)
-        self.zp = self.calc_zero()
+    def quantize(self, x:torch.Tensor, calib_mode=True):
+        if calib_mode:
+            self.scale = self.calc_scale(x)
+            self.zp = self.calc_zero()
         return torch.clamp(torch.round(x/self.scale) + self.zp, self.qmin, self.qmax)
     def dequantize(self, x_q:torch.Tensor):
         return torch.tensor(self.scale * (x_q - self.zp))
@@ -260,8 +261,12 @@ class QuantLinear(nn.Module):
             self.w_scale = self.wtype.scale
             self.w_zp = self.wtype.zp
     def forward(self, x:torch.Tensor):
-        x_q = self.atype.quantize(x)
-        if self.calib:
+        if not self.calib: 
+            self.atype.scale = self.a_scale
+            self.atype.zp = self.a_zp
+            x_q = self.atype.quantize(x, calib_mode=False)
+        else:
+            x_q = self.atype.quantize(x)
             self.a_scale = self.atype.scale
             self.a_zp = self.atype.zp
         y_ = torch.matmul(x_q - self.atype.zp, self.weight.T - self.wtype.zp)
@@ -309,16 +314,72 @@ class QuantConv(nn.Module):
     def forward(self, x:torch.Tensor):
         _, _, h_in, w_in = x.shape 
         h_out, w_out = self._calcOutputSize(h_in, w_in)
-        x_unf = nn.functional.unfold(x, self.kernel_size, padding=self.padding, stride=self.stride)
-        x_unf = self.atype.quantize(x_unf)
-        if self.calib:
+        if not self.calib: 
+            self.atype.scale = self.a_scale
+            self.atype.zp = self.a_zp
+            x_q = self.atype.quantize(x, calib_mode=False)
+        else:
+            x_q = self.atype.quantize(x)
             self.a_scale = self.atype.scale
             self.a_zp = self.atype.zp
-        out_unf = torch.matmul((x_unf.transpose(1, 2) - self.atype.zp), self.weight.view(self.weight.size(0), -1).t() - self.wtype.zp) 
-        out_unf = ((self.atype.scale * self.wtype.scale) * out_unf) + self.bias
-        out_unf_dq = out_unf.transpose(2, 1) 
-        out_fold = nn.functional.fold(out_unf_dq, output_size=(h_out, w_out), kernel_size=(1, 1)) 
-        return out_fold 
+        x_q = x_q - self.a_zp
+        weight = self.weight - self.w_zp
+        out_q = F.conv2d(x_q , weight, stride=self.stride, padding=self.padding)
+        out_deq = (self.a_scale * self.w_scale) * out_q 
+        bias = torch.repeat_interleave(self.bias, h_out * w_out).view(self.weight.shape[0], h_out, w_out)
+        out_deq = out_deq + bias
+        return out_deq 
     
     
     
+class QuantLinearCH(QuantLinear):
+    
+    def __init__(self,  ch_groups=16, **params):
+        super().__init__(**params)
+        self.ch_groups = ch_groups
+        self.atypes = []
+        self.w = params['weight']
+        for i in range(self.ch_groups):
+            self.atypes.append(params['atype'])
+    def sort_channel_by_range(self, x:torch.Tensor):
+            min_x = torch.min(x, dim=1)[0]
+            max_x = torch.max(x, dim=1)[0]
+            mean_x = ((max_x + min_x) / 2).unsqueeze(1)
+            x_prime = x - mean_x
+            act_range = abs(max_x - min_x)
+            #sorting channels using activation range
+            return x_prime, mean_x, torch.argsort(act_range)
+    def sub_matmul(self, x:torch.Tensor, sorted_range_indices:torch.Tensor):
+        #group
+        b, m, ch = x.shape
+        ch, n = self.weight.shape
+        b_ = torch.arange(b).reshape(-1, 1)
+        
+        output = torch.zeros(b, m, n)
+        a_scale = []
+        a_zp = []
+        per_group_channels = math.ceil(ch / self.ch_groups)
+        print("Each group has=", per_group_channels)
+        for i in range(0, ch, per_group_channels):
+            print(f"i={i}")
+        #quantize the submatrices of x
+            if self.calib:
+                x_sub = x[b_, :, sorted_range_indices[:, i:i+per_group_channels]].transpose(-1, -2)
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
+                a_scale.append(self.atypes[i//per_group_channels].scale)
+                a_zp.append(self.atypes[i//per_group_channels].zp)
+            else:
+                self.atypes[i//per_group_channels].scale = self.a_scale[i//per_group_channels] 
+                self.atypes[i//per_group_channels].zp = self.a_zp[i//per_group_channels]
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x[b_, :, sorted_range_indices[:, i:i+per_group_channels]].transpose(-1, -2))
+            sub_matmul = torch.matmul(x_sub_q - self.atypes[i//per_group_channels].zp, self.weight.T[sorted_range_indices[:, i:i+per_group_channels], :] - self.w_zp)
+            output += ((self.atypes[i//per_group_channels].scale * self.wtype.scale) * sub_matmul)
+
+        if self.calib:
+            self.a_scale = torch.tensor(a_scale)
+            self.a_zp = torch.tensor(a_zp)
+        return output                
+    def forward(self, x:torch.Tensor):
+        x_p, m_x, sorted_indices = self.sort_channel_by_range(x)
+        weight_deq = self.wtype.dequantize(self.weight.detach().clone().requires_grad_(False))
+        return self.sub_matmul(x_p, sorted_indices) + ((m_x @ weight_deq.T) + self.bias)
