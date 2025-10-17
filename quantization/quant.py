@@ -140,7 +140,7 @@ class EditLayer:
         self.w_qparams = w_qparams
         self.a_qparams = a_qparams
         
-    def traverse(self, replace=True):
+    def traverse(self, replace=True, ch_groups=None):
         change_count = 0
         count = 0
         iter_model = iter(self.model.named_modules())
@@ -151,31 +151,71 @@ class EditLayer:
             if not replace:
                 if isinstance(layer, QuantConv) or isinstance(layer, QuantConv):
                     layer.calib = False
-                    
+            elif not replace and ch_groups is not None:
+                if isinstance(layer, QuantConvCH) or isinstance(layer, QuantConvCH):
+                    layer.calib = False
+                    print("yes")
             else:
-                if isinstance(layer, nn.Linear):
-                    weight = layer.weight
-                    bias_val = layer.bias
+                if ch_groups is not None:
+                    if isinstance(layer, nn.Linear):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        params = {
+                            'wtype': self.wquant(**self.w_qparams), 
+                            'atype': self.aquant(**self.a_qparams), 
+                            'weight': weight,
+                            'bias': bias_val
+                        }
+                        replacedLayer = QuantLinearCH(ch_groups, **params)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                        change_count += 1
+                        print(f"The {name} layer is replaced by {replacedLayer} with {layer.weight.shape} and {layer.bias.shape if layer.bias is not None else None}")
+                    if isinstance(layer, nn.Conv2d):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        conv_params = {
+                            'in_channels': layer.in_channels, 
+                            'out_channels': layer.out_channels,
+                            'stride': layer.stride,
+                            'padding': layer.padding,
+                            'kernel': layer.kernel_size
+                        }
+                        params = {
+                            'wtype': self.wquant(**self.w_qparams), 
+                            'atype': self.aquant(**self.a_qparams), 
+                            'weight': weight,
+                            'bias': bias_val,
+                            'conv_params': conv_params
+                        }
+                        replacedLayer = QuantConvCH(ch_groups, **params)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                        change_count += 1
+                        print(f"The {name} layer is replaced by {replacedLayer}")
                     
-                    replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
-                    self.model.set_submodule(name, replacedLayer, strict=True)
-                    change_count += 1
-                    print(f"The {name} layer is replaced by {replacedLayer} with {layer.weight.shape} and {layer.bias.shape if layer.bias is not None else None}")
-                if isinstance(layer, nn.Conv2d):
-                    weight = layer.weight
-                    bias_val = layer.bias
-                    conv_params = {
-                        'in_channels': layer.in_channels, 
-                        'out_channels': layer.out_channels,
-                        'stride': layer.stride,
-                        'padding': layer.padding,
-                        'kernel': layer.kernel_size
-                    }
-                    replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
-                    self.model.set_submodule(name, replacedLayer, strict=True)
-                    change_count += 1
-                    print(f"The {name} layer is replaced by {replacedLayer}")
-                    
+                else:
+                    if isinstance(layer, nn.Linear):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        
+                        replacedLayer = QuantLinear(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight=weight, bias=bias_val)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                        change_count += 1
+                        print(f"The {name} layer is replaced by {replacedLayer} with {layer.weight.shape} and {layer.bias.shape if layer.bias is not None else None}")
+                    if isinstance(layer, nn.Conv2d):
+                        weight = layer.weight
+                        bias_val = layer.bias
+                        conv_params = {
+                            'in_channels': layer.in_channels, 
+                            'out_channels': layer.out_channels,
+                            'stride': layer.stride,
+                            'padding': layer.padding,
+                            'kernel': layer.kernel_size
+                        }
+                        replacedLayer = QuantConv(self.wquant(**self.w_qparams), self.aquant(**self.a_qparams), weight, bias_val, conv_params)
+                        self.model.set_submodule(name, replacedLayer, strict=True)
+                        change_count += 1
+                        print(f"The {name} layer is replaced by {replacedLayer}")
+                        
             count+=1
         if replace: print(f"Total {count} layers. And total {change_count} layers changed.")
         else: print(f"All {count} layers changed to test mode.")
@@ -236,8 +276,18 @@ class EditLayer:
                        
             print(f"Total {count} layers in the {block_name}{'.'+module_name if module_name is not None else ''} replaced.")
                 
-    
-
+    def find_channel_length(self):
+        iter_model = iter(self.model.named_modules())
+        next(iter_model)
+        for name, layer in iter_model:
+            if isinstance(layer, nn.Linear):
+                _, chs = layer.weight.shape
+                print(f"The {name} layer has {chs} total channels.")
+            if isinstance(layer, nn.Conv2d):
+                _, chs, _, _ = layer.weight.shape
+                print(f"The {name} layer has {chs} total channels.")
+                
+        
             
 class QuantLinear(nn.Module):
     def __init__(self, wtype:Union[UniformQuant, AdaQuant], 
