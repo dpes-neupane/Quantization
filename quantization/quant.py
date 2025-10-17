@@ -403,10 +403,10 @@ class QuantLinearCH(QuantLinear):
             
     def sort_channel_by_range(self, x:torch.Tensor):
             # min_x = torch.min(x, dim=1)[0]
-            b, ch = x.shape[0], x.shape[1]
+            b, m = x.shape[0], x.shape[1]
             if self.calib:
-                min_x = torch.min(x.view(1, b * ch, x.shape[2]), dim=1)[0]
-                max_x = torch.max(x.view(1, b * ch, x.shape[2]), dim=1)[0]
+                min_x = torch.min(x.view(1, b * m, x.shape[2]), dim=1)[0]
+                max_x = torch.max(x.view(1, b * m, x.shape[2]), dim=1)[0]
                 self.minmaxing(max_x, min_x)
                 self.mean_x = ((self.max_in_ch + self.min_in_ch) / 2).unsqueeze(1)
             x_prime = x - self.mean_x
@@ -414,6 +414,17 @@ class QuantLinearCH(QuantLinear):
             #sorting channels using activation range
             return x_prime, torch.argsort(act_range)
         
+    def sort_channel_by_range2d(self, x:torch.Tensor):
+        min_x = torch.min(x, dim=0)[0]
+        max_x = torch.max(x, dim=0)[0]
+        self.minmaxing(max_x, min_x)
+        self.mean_x = ((self.max_in_ch + self.min_in_ch) / 2)
+        x_prime = x - self.mean_x
+        act_range = abs(self.max_in_ch - self.min_in_ch)
+        #sorting channels using activation range
+        return x_prime, torch.argsort(act_range)
+    
+    
     def minmaxing(self, max_x_new:torch.Tensor, min_x_new:torch.Tensor):
         if self.max_in_ch is not None:
             bit_mask = torch.gt(self.max_in_ch, max_x_new)
@@ -433,7 +444,7 @@ class QuantLinearCH(QuantLinear):
     def sub_matmul(self, x:torch.Tensor, sorted_range_indices:torch.Tensor):
         #group
         b, m, ch = x.shape
-        ch, n = self.weight.shape
+        n, ch = self.weight.shape
         b_ = torch.arange(b).reshape(-1, 1)
         
         output = torch.zeros(b, m, n)
@@ -455,12 +466,39 @@ class QuantLinearCH(QuantLinear):
             sub_matmul = torch.matmul(x_sub_q - self.atypes[i//per_group_channels].zp, self.weight.T[sorted_range_indices[:, i:i+per_group_channels], :] - self.w_zp)
             output += ((self.atypes[i//per_group_channels].scale * self.wtype.scale) * sub_matmul)
         return output 
+    
+    def sub_matmul2d(self, x:torch.Tensor, sorted_range_indices:torch.Tensor):
+        b, ch = x.shape
+        n, ch = self.weight.shape
+        
+        output = torch.zeros(b, n)
+        if self.calib:
+            self.a_scale = torch.zeros(self.ch_groups)
+            self.a_zp = torch.zeros(self.ch_groups)
+        per_group_channels = math.ceil(ch / self.ch_groups)
+        for i in range(0, ch, per_group_channels):
+        #quantize the submatrices of x
+            x_sub = x[:, sorted_range_indices[i:i+per_group_channels]]
+            if self.calib:
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
+                self.a_scale[i//per_group_channels] = self.atypes[i//per_group_channels].scale
+                self.a_zp[i//per_group_channels] = self.atypes[i//per_group_channels].zp
+            else:
+                self.atypes[i//per_group_channels].scale = self.a_scale[i//per_group_channels] 
+                self.atypes[i//per_group_channels].zp = self.a_zp[i//per_group_channels]
+                x_sub_q = self.atypes[i//per_group_channels].quantize(x_sub)
+            sub_matmul = torch.matmul(x_sub_q - self.atypes[i//per_group_channels].zp, self.weight.T[sorted_range_indices[i:i+per_group_channels], :] - self.w_zp)
+            output += ((self.atypes[i//per_group_channels].scale * self.wtype.scale) * sub_matmul)
+        return output
                    
     def forward(self, x:torch.Tensor):
-        x_p, sorted_indices = self.sort_channel_by_range(x)
-        weight_deq = self.wtype.dequantize(self.weight.detach().clone().requires_grad_(False))
-        return self.sub_matmul(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
-    
+        weight_deq = self.wtype.dequantize(self.weight)
+        if len(x.shape) > 2:
+            x_p, sorted_indices = self.sort_channel_by_range(x)
+            return self.sub_matmul(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
+        else: 
+            x_p, sorted_indices = self.sort_channel_by_range2d(x)
+            return self.sub_matmul2d(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
     
 class QuantConvCH(QuantConv):
     def __init__(self, ch_groups=16, **params):
