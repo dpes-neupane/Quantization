@@ -140,7 +140,7 @@ class EditLayer:
         self.w_qparams = w_qparams
         self.a_qparams = a_qparams
         
-    def traverse(self, replace=True, ch_groups=None):
+    def traverse(self, replace=True, ch_groups=None, device='cpu'):
         change_count = 0
         count = 0
         iter_model = iter(self.model.named_modules())
@@ -166,7 +166,7 @@ class EditLayer:
                             'weight': weight,
                             'bias': bias_val
                         }
-                        replacedLayer = QuantLinearCH(ch_groups, **params)
+                        replacedLayer = QuantLinearCH(ch_groups, device=device, **params)
                         self.model.set_submodule(name, replacedLayer, strict=True)
                         change_count += 1
                         print(f"The {name} layer is replaced by {replacedLayer} with {layer.weight.shape} and {layer.bias.shape if layer.bias is not None else None}")
@@ -187,7 +187,7 @@ class EditLayer:
                             'bias': bias_val,
                             'conv_params': conv_params
                         }
-                        replacedLayer = QuantConvCH(ch_groups, **params)
+                        replacedLayer = QuantConvCH(ch_groups, device=device, **params)
                         self.model.set_submodule(name, replacedLayer, strict=True)
                         change_count += 1
                         print(f"The {name} layer is replaced by {replacedLayer}")
@@ -388,13 +388,14 @@ class QuantConv(nn.Module):
     
 class QuantLinearCH(QuantLinear):
     
-    def __init__(self,  ch_groups=16, **params):
+    def __init__(self,  ch_groups=16, device='cpu', **params):
         super().__init__(**params)
         self.ch_groups = ch_groups
         self.register_buffer('min_in_ch', None)
         self.register_buffer('max_in_ch', None)
         self.register_buffer('mean_x', None)
         self.atypes = []
+        self.device = device
         
         for _ in range(self.ch_groups):
             if isinstance(params['atype'], UniformQuant):
@@ -447,10 +448,10 @@ class QuantLinearCH(QuantLinear):
         n, ch = self.weight.shape
         b_ = torch.arange(b).reshape(-1, 1)
         
-        output = torch.zeros(b, m, n)
+        output = torch.zeros(b, m, n).to(self.device)
         if self.calib:
-            self.a_scale = torch.zeros(self.ch_groups)
-            self.a_zp = torch.zeros(self.ch_groups)
+            self.a_scale = torch.zeros(self.ch_groups).to(self.device)
+            self.a_zp = torch.zeros(self.ch_groups).to(self.device)
         per_group_channels = math.ceil(ch / self.ch_groups)
         for i in range(0, ch, per_group_channels):
         #quantize the submatrices of x
@@ -501,10 +502,11 @@ class QuantLinearCH(QuantLinear):
             return self.sub_matmul2d(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
     
 class QuantConvCH(QuantConv):
-    def __init__(self, ch_groups=16, **params):
+    def __init__(self, ch_groups=16, device='cpu', **params):
         super().__init__(**params)
         self.atypes = []
         self.ch_groups = ch_groups
+        self.device = device
         self.register_buffer('min_in_ch', None)
         self.register_buffer('max_in_ch', None)
         self.register_buffer('sorted_ch_indices', None)
@@ -542,10 +544,10 @@ class QuantConvCH(QuantConv):
     def sub_convolution(self, x:torch.Tensor, sorted_range_indices:torch.Tensor, 
                  h_out:int, w_out:int, b:int, ch:int, h:int, w:int, out_ch:int, in_ch:int, k1:int, k2:int):
         b_ = torch.arange(b).reshape(-1, 1)
-        output = torch.zeros(b, out_ch, h_out, w_out)
+        output = torch.zeros(b, out_ch, h_out, w_out).to(self.device)
         if self.calib:
-            self.a_scale = torch.zeros(self.ch_groups)
-            self.a_zp = torch.zeros(self.ch_groups)
+            self.a_scale = torch.zeros(self.ch_groups).to(self.device)
+            self.a_zp = torch.zeros(self.ch_groups).to(self.device)
         per_group_channels = math.ceil(ch / self.ch_groups)
         for i in range(0, ch, per_group_channels):
             x_sub = x[b_, sorted_range_indices[:, i:i+per_group_channels], :, :]
