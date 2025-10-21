@@ -472,7 +472,7 @@ class QuantLinearCH(QuantLinear):
         b, ch = x.shape
         n, ch = self.weight.shape
         
-        output = torch.zeros(b, n)
+        output = torch.zeros(b, n).to(self.device)
         if self.calib:
             self.a_scale = torch.zeros(self.ch_groups)
             self.a_zp = torch.zeros(self.ch_groups)
