@@ -404,10 +404,10 @@ class QuantLinearCH(QuantLinear):
             
     def sort_channel_by_range(self, x:torch.Tensor):
             # min_x = torch.min(x, dim=1)[0]
-            b, m = x.shape[0], x.shape[1]
+            b, m, ch = x.shape[0], x.shape[1], x.shape[2]
             if self.calib:
-                min_x = torch.min(x.view(1, b * m, x.shape[2]), dim=1)[0]
-                max_x = torch.max(x.view(1, b * m, x.shape[2]), dim=1)[0]
+                min_x = torch.min(x.reshape(1, b * m, ch), dim=1)[0]
+                max_x = torch.max(x.reshape(1, b * m, ch), dim=1)[0]
                 self.minmaxing(max_x, min_x)
                 self.mean_x = ((self.max_in_ch + self.min_in_ch) / 2).unsqueeze(1)
             x_prime = x - self.mean_x
