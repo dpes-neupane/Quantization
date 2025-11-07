@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from typing import List, Union
 from abc import ABC, abstractmethod
 import math 
-from quant import *
 
 def sigmoid(v):
     return 1/(1 + torch.exp(-v))
