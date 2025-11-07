@@ -3,7 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Union
 from abc import ABC, abstractmethod
-import math
+import math 
+from quant import *
 
 def sigmoid(v):
     return 1/(1 + torch.exp(-v))
@@ -42,14 +43,18 @@ class UniformQuant:
     def calc_zero(self):
         if not self.symm:
             quotient = torch.round(self.xmax/self.scale)
-            return (self.qmax - quotient).detach().clone()
-            # return torch.tensor(self.qmax - (torch.round(torch.tensor(self.xmax/self.scale))))
+            if torch.isnan(quotient):
+                return self.qmax
+            zero = (self.qmax - quotient).detach().clone()
+            return zero
         else: return torch.tensor(0)
     def quantize(self, x:torch.Tensor, calib_mode=True):
         if calib_mode:
             self.scale = self.calc_scale(x)
             self.zp = self.calc_zero()
-        return torch.clamp(torch.round(x/self.scale) + self.zp, self.qmin, self.qmax)
+        q_val = torch.clamp(torch.round(x/self.scale) + self.zp, self.qmin, self.qmax)
+        q_val = torch.where(torch.isnan(q_val), self.zp, q_val)
+        return q_val
     def dequantize(self, x_q:torch.Tensor):
         if isinstance(x_q, torch.Tensor):
             return self.scale * (x_q - self.zp)
@@ -396,7 +401,6 @@ class QuantLinearCH(QuantLinear):
         self.register_buffer('mean_x', None)
         self.atypes = []
         self.device = device
-        
         for _ in range(self.ch_groups):
             if isinstance(params['atype'], UniformQuant):
                 self.atypes.append(UniformQuant(params['atype'].n_bits, params['atype'].symm))
@@ -499,8 +503,9 @@ class QuantLinearCH(QuantLinear):
             return self.sub_matmul(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
         else: 
             x_p, sorted_indices = self.sort_channel_by_range2d(x)
-            return self.sub_matmul2d(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
-    
+            output = self.sub_matmul2d(x_p, sorted_indices) + ((self.mean_x @ weight_deq.T) + self.bias)
+            return output
+        
 class QuantConvCH(QuantConv):
     def __init__(self, ch_groups=16, device='cpu', **params):
         super().__init__(**params)
@@ -515,7 +520,6 @@ class QuantConvCH(QuantConv):
             if isinstance(params['atype'], UniformQuant):
                 self.atypes.append(UniformQuant(params['atype'].n_bits, params['atype'].symm))
             else: NotImplementedError
-            
     def sort_channel_by_range(self, x:torch.Tensor, b:int, ch:int, h:int, w:int):
         if self.calib:
             min_x = torch.min(x.view(1,  ch, b * h * w), dim=-1)[0]
