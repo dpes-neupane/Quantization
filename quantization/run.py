@@ -203,6 +203,9 @@ def run(unet,
 
   for i in range(0, len(img_set), batch_size):
     im1 = img_set[i]
+    img_str = im1.split(".")[0]
+    if im1.endswith('x8'):
+      im1 = img_str[:-2] + "x4.png"
     if prompt_dict is not None:
       prompt = prompt_dict[im1]
     else:
