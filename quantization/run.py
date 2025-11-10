@@ -212,7 +212,7 @@ def run(unet,
     img_ = load_img(path1)
     if test_mode:
       latents = diffusion_loop(unet, pipeline, img_, prompt)
-      if im1.endswith('x8'):
+      if img_str.endswith('x8'):
         im1 = img_str[:-2] + "x4.png"
       p1 = os.path.join(target_set_folder, im1)
       # p2 = os.path.join(target_set_folder, im2)
