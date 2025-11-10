@@ -192,6 +192,7 @@ def saveImg(pipeline, latents, save_folder):
 def run(unet, 
         pipeline, 
         img_set, 
+        img_set_path='./BSD100_LR_x2',
         prompt_dict=bsd100_prompts, 
         batch_size=1, test_mode=False, 
         target_set_folder=None, 
@@ -202,9 +203,11 @@ def run(unet,
 
   for i in range(0, len(img_set), batch_size):
     im1 = img_set[i]
-
-    prompt = prompt_dict[im1]
-    path1 = os.path.join('./BSD100_LR_x2', im1)
+    if prompt_dict is not None:
+      prompt = prompt_dict[im1]
+    else:
+      prompt = ""
+    path1 = os.path.join(img_set_path, im1)
     img_ = load_img(path1)
 
     # img_ = [img_1, img_2]
@@ -236,3 +239,6 @@ def run(unet,
     psnr_val = psnr.compute()
     ssim_val = ssim.compute()
     print(f"The psnr is: {psnr_val} and ssim is: {ssim_val}")
+    
+    
+    
