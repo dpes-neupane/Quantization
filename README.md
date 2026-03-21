@@ -52,10 +52,11 @@ Standard layer-wise quantization scales all channels based on the single largest
 ### Performance Comparison (BSD100 Dataset)
 | Quantization Scheme | Mean PSNR | Mean SSIM |
 | :--- | :---: | :---: |
-| **32-bit (Baseline)** | 27.54 | 0.77 |
-| **Layer-wise (INT8)** | 21.45 | 0.48 |
-| **Group-wise (G=32, INT8)** | **23.11** | **0.55** |
-| **Channel-wise (INT8)** | 23.32 | 0.56 |
+| **32-bit (Baseline)** |  23.883 | 0.608 |
+| **Layer-wise (INT8)** | 19.921 | 0.296 |
+| **Group-wise (G=16, INT8)** | 23.009 | 0.537 |
+| **Group-wise (G=32, INT8)** | **23.118** | **0.548** |
+
 
 ### Resource Efficiency
 | Metric | Full Precision (FP32) | Quantized (INT8) | Reduction |
