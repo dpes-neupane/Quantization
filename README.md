@@ -61,7 +61,7 @@ Standard layer-wise quantization scales all channels based on the single largest
 ### Qualitative Results (Visual Comparison)
 | Original (FP32 Baseline) | Group-wise Quantized (G=32) | Group-wise Quantized (G=16) | Group-wise Quantized (G=8) |
 | :---: | :---: | :---: | :---: |
-| <img src="images/102061original.png" width="250"/> | <img src="images/102061.png" width="250"/> | <img src="images/102061 (1).png" width="250"/> | <img src="images/102061 (2).png" width="250"/>
+| <img src="quantization/images/102061original.png" width="250"/> | <img src="quantization/images/102061.png" width="250"/> | <img src="quantization/images/102061 (1).png" width="250"/> | <img src="quantization/images/102061 (2).png" width="250"/>
 
 ### Resource Efficiency
 | Metric | Full Precision (FP32) | Quantized (INT8) | Reduction |
